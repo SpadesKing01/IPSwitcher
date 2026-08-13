@@ -14,7 +14,7 @@
 
 ## 🚀 快速使用
 
-1. 在 [Releases](../../releases) 页面下载最新版的 `IPSwitcher_Tray.exe`。
+1. 在 [Releases](../../releases) 页面下载最新版的 `IPSwitcher.exe`。
 2. 双击运行（程序需要管理员权限以修改网络配置，请在弹窗中允许）。
 3. 界面操作说明：
    - 拖动顶部细条可移动窗口。
