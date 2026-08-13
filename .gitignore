@@ -1,0 +1,7 @@
+__pycache__/
+build/
+*.pyc
+.env
+upx*
+ip_switcher_config.json
+IPSwitcher_源码.py
