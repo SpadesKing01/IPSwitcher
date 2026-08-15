@@ -517,10 +517,22 @@ class App:
         threading.Thread(target=self._run_scan_worker, args=(base_ip, cur_ip), daemon=True).start()
         
     def _run_scan_worker(self, base_ip, src_ip):
+        import ctypes, socket, struct
         def ping_ip(i):
             ip = f"{base_ip}{i}"
             try:
-                # ping 1次, 超时时间为300ms
+                # 1. 先用 SendARP 检查是否有这个设备的 MAC（判断是否被占用）
+                dest = struct.unpack('<I', socket.inet_aton(ip))[0]
+                src = struct.unpack('<I', socket.inet_aton(src_ip))[0] if src_ip else 0
+                mac = ctypes.create_string_buffer(6)
+                mac_len = ctypes.c_ulong(6)
+                res = ctypes.windll.iphlpapi.SendARP(dest, src, mac, ctypes.byref(mac_len))
+                
+                if res != 0:
+                    # 返回非0说明 ARP 失败，局域网中无人使用此IP -> 灰色
+                    return i, "gray"
+                
+                # 2. 如果 ARP 成功说明有人使用，再 Ping 一次区分是通(绿)还是禁Ping(红)
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 cmd = ["ping", "-n", "1", "-w", "300"]
@@ -530,17 +542,10 @@ class App:
                 r = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo)
                 out = r.stdout.lower()
                 
-                # 分析结果
-                # 绿色(Ping通): Reply from ... bytes=... time=... TTL=...
-                # 红色(Ping不通, 超时): Request timed out. / 超时
-                # 灰色(无人使用, ARP失败): Destination host unreachable. / 无法访问
                 if "ttl=" in out:
-                    state = "green"
-                elif "unreachable" in out or "无法访问" in out:
-                    state = "gray"
+                    return i, "green"
                 else:
-                    state = "red" # timeout or other failures
-                return i, state
+                    return i, "red"
             except Exception:
                 return i, "gray"
                 
