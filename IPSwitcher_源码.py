@@ -492,12 +492,17 @@ class App:
             
     def _start_scan(self):
         base_ip = self.scan_ip_base.get().strip()
+        cur_ip = None
+        cur = self._cur()
+        if cur and cur.get("ip"):
+            cur_ip = cur["ip"]
+
         if not base_ip:
-            cur = self._cur()
-            if cur and cur.get("ip"):
-                parts = cur["ip"].split(".")
+            if cur_ip:
+                parts = cur_ip.split(".")
                 if len(parts) == 4:
                     base_ip = f"{parts[0]}.{parts[1]}.{parts[2]}."
+                    self.scan_ip_base.delete(0, "end")
                     self.scan_ip_base.insert(0, base_ip)
             if not base_ip:
                 self._toast("请输入起始IP, 如 192.168.0.")
@@ -509,17 +514,20 @@ class App:
         for i in range(1, 255):
             self.scan_labels[i].configure(fg_color=DBTN, text_color=SUB) # reset
             
-        threading.Thread(target=self._run_scan_worker, args=(base_ip,), daemon=True).start()
+        threading.Thread(target=self._run_scan_worker, args=(base_ip, cur_ip), daemon=True).start()
         
-    def _run_scan_worker(self, base_ip):
+    def _run_scan_worker(self, base_ip, src_ip):
         def ping_ip(i):
             ip = f"{base_ip}{i}"
             try:
                 # ping 1次, 超时时间为300ms
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                r = subprocess.run(["ping", "-n", "1", "-w", "300", ip], 
-                                   capture_output=True, text=True, startupinfo=startupinfo)
+                cmd = ["ping", "-n", "1", "-w", "300"]
+                if src_ip:
+                    cmd.extend(["-S", src_ip])
+                cmd.append(ip)
+                r = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo)
                 out = r.stdout.lower()
                 
                 # 分析结果
@@ -651,6 +659,15 @@ class App:
         if name in ("(无适配器)",): return
         self.config.data["adapter"] = name; self.config.save()
         self._update_highlight()
+        
+        # 自动更新局域网扫描的起始IP
+        cur = self._cur()
+        if cur and cur.get("ip"):
+            parts = cur["ip"].split(".")
+            if len(parts) == 4:
+                base_ip = f"{parts[0]}.{parts[1]}.{parts[2]}."
+                self.scan_ip_base.delete(0, "end")
+                self.scan_ip_base.insert(0, base_ip)
 
     def _on_refresh_click(self):
         self._toast("刷新中…")
