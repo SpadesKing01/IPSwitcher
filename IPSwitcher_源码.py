@@ -8,9 +8,11 @@ import tkinter as tk
 import customtkinter as ctk
 from PIL import Image, ImageDraw
 import pystray
+import concurrent.futures
+import re
 
 # ---------------- 可调常量 ----------------
-W = 300                 # 窗口固定宽度
+W = 640                 # 窗口固定宽度
 CARD_H = 38             # 卡片高度
 ROW_STEP = 44           # 每行卡片占用高度(含间距)
 HEADER_H = 98           # 顶部固定区高度(拖动条+适配器行+标题行+底边距)
@@ -411,8 +413,23 @@ class App:
 
     # ---- 主体 ----
     def _build_body(self):
-        body = ctk.CTkFrame(self.root, fg_color="transparent", corner_radius=0)
-        body.pack(fill="x")
+        self.main_container = ctk.CTkFrame(self.root, fg_color="transparent", corner_radius=0)
+        self.main_container.pack(fill="both", expand=True)
+
+        # ====== 左侧：局域网扫描 ======
+        self.left_panel = ctk.CTkFrame(self.main_container, fg_color="transparent", width=310)
+        self.left_panel.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        self.left_panel.pack_propagate(False)
+        self._build_lan_scanner(self.left_panel)
+
+        # 分隔线
+        sep = ctk.CTkFrame(self.main_container, width=1, fg_color=CARD_B)
+        sep.pack(side="left", fill="y", pady=10)
+
+        # ====== 右侧：IP管理 ======
+        body = ctk.CTkFrame(self.main_container, fg_color="transparent", width=320)
+        body.pack(side="right", fill="both", expand=True)
+        body.pack_propagate(False)
 
         f1 = ctk.CTkFrame(body, fg_color="transparent"); f1.pack(fill="x", padx=10, pady=(8, 4))
         self.adapter_menu = ctk.CTkOptionMenu(f1, values=["(无适配器)"],
@@ -446,6 +463,94 @@ class App:
 
         self.toast = ctk.CTkLabel(self.root, text="", fg_color=TOAST_BG,
             text_color="white", corner_radius=6, font=F(11))
+
+    # ---- 局域网扫描 ----
+    def _build_lan_scanner(self, parent):
+        top_f = ctk.CTkFrame(parent, fg_color="transparent")
+        top_f.pack(fill="x", padx=10, pady=(8, 4))
+        
+        ctk.CTkLabel(top_f, text="起始IP", text_color=TXT, font=F(12)).pack(side="left")
+        self.scan_ip_base = ctk.CTkEntry(top_f, width=120, height=30, font=F(12), placeholder_text="192.168.0.")
+        self.scan_ip_base.pack(side="left", padx=8)
+        
+        self.btn_scan = ctk.CTkButton(top_f, text="扫描", width=60, height=30, fg_color=BLUE, hover_color=BLUE_H, font=F(12, "bold"), command=self._start_scan)
+        self.btn_scan.pack(side="right")
+        
+        # Grid area
+        self.scan_scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent", border_width=1, border_color=CARD_B, corner_radius=6)
+        self.scan_scroll.pack(fill="both", expand=True, padx=10, pady=(4, 10))
+        
+        # Build 254 labels
+        self.scan_labels = {}
+        cols = 8
+        for i in range(1, 255):
+            r, c = divmod(i - 1, cols)
+            lbl = ctk.CTkLabel(self.scan_scroll, text=str(i), width=30, height=24,
+                               fg_color=DBTN, text_color=SUB, font=F(11), corner_radius=4)
+            lbl.grid(row=r, column=c, padx=2, pady=2)
+            self.scan_labels[i] = lbl
+            
+    def _start_scan(self):
+        base_ip = self.scan_ip_base.get().strip()
+        if not base_ip:
+            cur = self._cur()
+            if cur and cur.get("ip"):
+                parts = cur["ip"].split(".")
+                if len(parts) == 4:
+                    base_ip = f"{parts[0]}.{parts[1]}.{parts[2]}."
+                    self.scan_ip_base.insert(0, base_ip)
+            if not base_ip:
+                self._toast("请输入起始IP, 如 192.168.0.")
+                return
+        if not base_ip.endswith("."):
+            base_ip += "."
+            
+        self.btn_scan.configure(state="disabled", text="扫描中...")
+        for i in range(1, 255):
+            self.scan_labels[i].configure(fg_color=DBTN, text_color=SUB) # reset
+            
+        threading.Thread(target=self._run_scan_worker, args=(base_ip,), daemon=True).start()
+        
+    def _run_scan_worker(self, base_ip):
+        def ping_ip(i):
+            ip = f"{base_ip}{i}"
+            try:
+                # ping 1次, 超时时间为300ms
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                r = subprocess.run(["ping", "-n", "1", "-w", "300", ip], 
+                                   capture_output=True, text=True, startupinfo=startupinfo)
+                out = r.stdout.lower()
+                
+                # 分析结果
+                # 绿色(Ping通): Reply from ... bytes=... time=... TTL=...
+                # 红色(Ping不通, 超时): Request timed out. / 超时
+                # 灰色(无人使用, ARP失败): Destination host unreachable. / 无法访问
+                if "ttl=" in out:
+                    state = "green"
+                elif "unreachable" in out or "无法访问" in out:
+                    state = "gray"
+                else:
+                    state = "red" # timeout or other failures
+                return i, state
+            except Exception:
+                return i, "gray"
+                
+        with concurrent.futures.ThreadPoolExecutor(max_workers=60) as executor:
+            futures = [executor.submit(ping_ip, i) for i in range(1, 255)]
+            for future in concurrent.futures.as_completed(futures):
+                i, state = future.result()
+                self.root.after(0, self._update_scan_label, i, state)
+                
+        self.root.after(0, lambda: self.btn_scan.configure(state="normal", text="扫描"))
+        
+    def _update_scan_label(self, i, state):
+        if state == "green":
+            self.scan_labels[i].configure(fg_color=CARD_SEL, text_color=GREEN)
+        elif state == "red":
+            self.scan_labels[i].configure(fg_color=CARD_SEL, text_color=RED)
+        else: # gray
+            self.scan_labels[i].configure(fg_color=DBTN, text_color=SUB)
 
     # ---- 卡片(只显示IP, 宽度自适应) ----
     def _build_cards(self):
@@ -722,7 +827,8 @@ class App:
         self._rearrange()
         n = len(self.config.data["profiles"])
         rows = math.ceil(n / 2)            # 每行2个
-        h = HEADER_H + rows * ROW_STEP + 15  # 增加一点底边距避免被裁切
+        right_h = HEADER_H + rows * ROW_STEP + 15  # 增加一点底边距避免被裁切
+        h = max(right_h, 380) # 保证左侧扫描面板有足够的高度
         x = self.root.winfo_x(); y = self.root.winfo_y()
         
         # 强制将窗口坐标限制在工作区内，确保不会被屏幕边缘裁切
