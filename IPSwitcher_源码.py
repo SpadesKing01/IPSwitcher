@@ -470,8 +470,26 @@ class App:
         top_f.pack(fill="x", padx=10, pady=(8, 4))
         
         ctk.CTkLabel(top_f, text="起始IP", text_color=TXT, font=F(12)).pack(side="left")
-        self.scan_ip_base = ctk.CTkEntry(top_f, width=120, height=30, font=F(12), placeholder_text="192.168.0.")
-        self.scan_ip_base.pack(side="left", padx=8)
+        
+        self.ip_frame = ctk.CTkFrame(top_f, fg_color="transparent")
+        self.ip_frame.pack(side="left", padx=8)
+        
+        self.ip_entries = []
+        def validate_ip(P):
+            if P == "": return True
+            if not P.isdigit(): return False
+            if len(P) > 1 and P[0] == '0': return False
+            if int(P) > 255: return False
+            return True
+            
+        vcmd = (self.root.register(validate_ip), '%P')
+        
+        for i in range(4):
+            e = ctk.CTkEntry(self.ip_frame, width=38, height=30, font=F(12), justify="center", validate="key", validatecommand=vcmd)
+            e.pack(side="left")
+            self.ip_entries.append(e)
+            if i < 3:
+                ctk.CTkLabel(self.ip_frame, text=".", font=F(14, "bold")).pack(side="left", padx=2)
         
         self.btn_scan = ctk.CTkButton(top_f, text="扫描", width=60, height=30, fg_color=BLUE, hover_color=BLUE_H, font=F(12, "bold"), command=self._start_scan)
         self.btn_scan.pack(side="right")
@@ -491,24 +509,26 @@ class App:
             self.scan_labels[i] = lbl
             
     def _start_scan(self):
-        base_ip = self.scan_ip_base.get().strip()
+        parts = [e.get().strip() for e in self.ip_entries]
+        
         cur_ip = None
         cur = self._cur()
         if cur and cur.get("ip"):
             cur_ip = cur["ip"]
 
-        if not base_ip:
+        if not all(parts[:3]):
             if cur_ip:
-                parts = cur_ip.split(".")
-                if len(parts) == 4:
-                    base_ip = f"{parts[0]}.{parts[1]}.{parts[2]}."
-                    self.scan_ip_base.delete(0, "end")
-                    self.scan_ip_base.insert(0, base_ip)
-            if not base_ip:
-                self._toast("请输入起始IP, 如 192.168.0.")
+                cp = cur_ip.split(".")
+                if len(cp) == 4:
+                    for i in range(4):
+                        self.ip_entries[i].delete(0, "end")
+                        self.ip_entries[i].insert(0, cp[i])
+                    parts = cp
+            if not all(parts[:3]):
+                self._toast("请在左侧填入完整的IP段")
                 return
-        if not base_ip.endswith("."):
-            base_ip += "."
+                
+        base_ip = f"{parts[0]}.{parts[1]}.{parts[2]}."
             
         self.btn_scan.configure(state="disabled", text="扫描中...")
         for i in range(1, 255):
@@ -670,9 +690,9 @@ class App:
         if cur and cur.get("ip"):
             parts = cur["ip"].split(".")
             if len(parts) == 4:
-                base_ip = f"{parts[0]}.{parts[1]}.{parts[2]}."
-                self.scan_ip_base.delete(0, "end")
-                self.scan_ip_base.insert(0, base_ip)
+                for i in range(4):
+                    self.ip_entries[i].delete(0, "end")
+                    self.ip_entries[i].insert(0, parts[i])
 
     def _on_refresh_click(self):
         self._toast("刷新中…")
