@@ -491,11 +491,27 @@ class App:
                         self.ip_entries[idx+1].focus()
                     return "break"
             return on_key
+            
+        def make_on_bs(idx):
+            def on_bs(event):
+                try:
+                    # 如果光标在最前面，且不是第一个格子，按下退格键回到上一个格子并删除最后一个字符
+                    if self.ip_entries[idx].index("insert") == 0 and idx > 0:
+                        prev_e = self.ip_entries[idx-1]
+                        prev_e.focus()
+                        val = prev_e.get()
+                        if len(val) > 0:
+                            prev_e.delete(len(val)-1, "end")
+                        return "break"
+                except Exception:
+                    pass
+            return on_bs
         
         for i in range(4):
             e = ctk.CTkEntry(self.ip_frame, width=38, height=30, font=F(12), justify="center", validate="key", validatecommand=vcmd)
             e.pack(side="left")
             e.bind("<Key>", make_on_key(i))
+            e.bind("<BackSpace>", make_on_bs(i))
             self.ip_entries.append(e)
             if i < 3:
                 ctk.CTkLabel(self.ip_frame, text=".", font=F(14, "bold")).pack(side="left", padx=2)
