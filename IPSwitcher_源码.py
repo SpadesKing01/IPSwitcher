@@ -566,18 +566,7 @@ class App:
         def ping_ip(i):
             ip = f"{base_ip}{i}"
             try:
-                # 1. 先用 SendARP 检查是否有这个设备的 MAC（判断是否被占用）
-                dest = struct.unpack('<I', socket.inet_aton(ip))[0]
-                src = struct.unpack('<I', socket.inet_aton(src_ip))[0] if src_ip else 0
-                mac = ctypes.create_string_buffer(6)
-                mac_len = ctypes.c_ulong(6)
-                res = ctypes.windll.iphlpapi.SendARP(dest, src, mac, ctypes.byref(mac_len))
-                
-                if res != 0:
-                    # 返回非0说明 ARP 失败，局域网中无人使用此IP -> 灰色
-                    return i, "gray"
-                
-                # 2. 如果 ARP 成功说明有人使用，再 Ping 一次区分是通(绿)还是禁Ping(红)
+                # 1. 先 ping 一次
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 cmd = ["ping", "-n", "1", "-w", "300"]
@@ -588,9 +577,19 @@ class App:
                 out = r.stdout.lower()
                 
                 if "ttl=" in out:
-                    return i, "green"
+                    return i, "green" # 能通，说明是活的
+                    
+                # 2. 如果 Ping 不通，再用 SendARP 看看是不是在同一个局域网且禁Ping了
+                dest = struct.unpack('<I', socket.inet_aton(ip))[0]
+                src = struct.unpack('<I', socket.inet_aton(src_ip))[0] if src_ip else 0
+                mac = ctypes.create_string_buffer(6)
+                mac_len = ctypes.c_ulong(6)
+                res = ctypes.windll.iphlpapi.SendARP(dest, src, mac, ctypes.byref(mac_len))
+                
+                if res == 0:
+                    return i, "red" # ARP 成功，说明在同一个局域网且存活，但是禁Ping
                 else:
-                    return i, "red"
+                    return i, "gray" # ARP 失败，说明无人使用，或者跨网段且不通
             except Exception:
                 return i, "gray"
                 
