@@ -484,9 +484,18 @@ class App:
             
         vcmd = (self.root.register(validate_ip), '%P')
         
+        def make_on_key(idx):
+            def on_key(event):
+                if event.char == '.' or event.keysym == 'period':
+                    if idx < 3:
+                        self.ip_entries[idx+1].focus()
+                    return "break"
+            return on_key
+        
         for i in range(4):
             e = ctk.CTkEntry(self.ip_frame, width=38, height=30, font=F(12), justify="center", validate="key", validatecommand=vcmd)
             e.pack(side="left")
+            e.bind("<Key>", make_on_key(i))
             self.ip_entries.append(e)
             if i < 3:
                 ctk.CTkLabel(self.ip_frame, text=".", font=F(14, "bold")).pack(side="left", padx=2)
